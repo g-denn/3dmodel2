@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Sovietcoin — GLB Viewer</title>
+  <style>
+    :root { --bg:#ffffff; --ink:#0b0c0f; --muted:#667085; --panel:#f3f4f6; --radius:16px; --shadow:0 10px 30px rgba(0,0,0,.12); }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{margin:0;background:var(--bg);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+    header{position:fixed;left:16px;top:16px;z-index:10;background:rgba(255,255,255,.9);backdrop-filter:saturate(1.2) blur(6px);border:1px solid #e5e7eb;border-radius:12px;padding:8px 12px;box-shadow:var(--shadow)}
+    header h1{margin:0;font-size:16px;letter-spacing:.2px}
+    header .sub{font-size:12px;color:var(--muted)}
+    #stage{position:absolute;inset:0}
+    #status{position:fixed;left:16px;bottom:16px;z-index:10;background:#fff;border:1px solid #e5e7eb;border-radius:999px;padding:6px 10px;font-size:12px;box-shadow:0 2px 6px rgba(0,0,0,.06)}
+    #status.ok{background:#ecfdf5;border-color:#a7f3d0;color:#065f46}
+    #status.warn{background:#fff7ed;border-color:#fed7aa;color:#9a3412}
+    #status.err{background:#fef2f2;border-color:#fecaca;color:#991b1b}
+    #toolbar{position:fixed;right:16px;bottom:16px;z-index:10;display:flex;gap:8px}
+    .btn{border:1px solid #e5e7eb;background:white;border-radius:10px;padding:10px 14px;font-weight:700;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.04)}
+  </style>
+</head>
+<body>
+  <header>
+    <h1>💰 Sovietcoin — GLB Viewer</h1>
+    <div class="sub">Loads <code>sovietcoin.glb</code> from this folder</div>
+  </header>
+
+  <div id="stage"></div>
+  <div id="status">Initializing…</div>
+  <div id="toolbar"><button id="reset" class="btn">Reset View</button></div>
+
+  <!-- Three.js (ES Modules) -->
+  <script type="module">
+    import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
+    import { OrbitControls } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/controls/OrbitControls.js';
+    import { GLTFLoader } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/GLTFLoader.js';
+
+    const GLB_PATH = './sovietcoin.glb'; // <-- your file name
+
+    const stage = document.getElementById('stage');
+    const statusEl = document.getElementById('status');
+    const setStatus=(msg,cls='')=>{ statusEl.textContent=msg; statusEl.className=cls?`$${''}{'status'} ${cls}`:'status'; };
+    // Fix className (template literal escaped above for safety)
+    function setState(msg, cls){ statusEl.textContent = msg; statusEl.className = 'status ' + (cls||''); }
+
+    // --- Renderer/Scene ---
+    const renderer = new THREE.WebGLRenderer({ antialias:true, alpha:false });
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    stage.appendChild(renderer.domElement);
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0xffffff);
+
+    const camera = new THREE.PerspectiveCamera(45, window.innerWidth/window.innerHeight, 0.01, 100);
+    camera.position.set(0, 0.25, 2.2);
+
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true; controls.dampingFactor = 0.08;
+    controls.minDistance = 0.2; controls.maxDistance = 6;
+
+    // Lights tuned for metal on white
+    scene.add(new THREE.HemisphereLight(0xffffff, 0xdedede, 0.9));
+    const key = new THREE.DirectionalLight(0xffffff, 0.9); key.position.set(1.4,1.2,1.6); scene.add(key);
+    const rim = new THREE.DirectionalLight(0xb0c4ff, 0.35); rim.position.set(-1.2,0.3,-0.9); scene.add(rim);
+
+    // Subtle ground to anchor visuals
+    const ground = new THREE.Mesh(new THREE.CircleGeometry(2.2, 64), new THREE.MeshBasicMaterial({color:0xeeeeee}));
+    ground.rotation.x = -Math.PI/2; ground.position.y = -0.6; scene.add(ground);
+
+    // --- Load GLB ---
+    const loader = new GLTFLoader();
+    let model = null;
+
+    function fitToView(object){
+      const box = new THREE.Box3().setFromObject(object);
+      const size = new THREE.Vector3(); box.getSize(size);
+      const center = new THREE.Vector3(); box.getCenter(center);
+      object.position.sub(center);
+      const maxDim = Math.max(size.x,size.y,size.z) || 1;
+      const scale = 1.2 / maxDim; // fill view comfortably
+      object.scale.setScalar(scale);
+      controls.target.set(0,0,0); controls.update();
+      camera.position.set(0, 0.25, 2.2);
+    }
+
+    function loadModel(){
+      setState('Loading sovietcoin.glb…');
+      loader.load(GLB_PATH, (gltf)=>{
+        if(model) scene.remove(model);
+        model = gltf.scene || gltf.scenes[0];
+        scene.add(model);
+        fitToView(model);
+        setState('Model loaded ✔', 'ok');
+      }, (ev)=>{
+        if(ev.total){ const pct = Math.round((ev.loaded/ev.total)*100); setState(`Loading… ${pct}%`); }
+      }, (err)=>{
+        console.error('GLB load error:', err);
+        if(location.protocol === 'file:'){
+          setState('Could not load file via file://. Run a local server (e.g., python -m http.server).', 'err');
+        } else {
+          setState('Failed to load ./sovietcoin.glb (check name/location).', 'err');
+        }
+      });
+    }
+
+    loadModel();
+
+    // UI
+    document.getElementById('reset').addEventListener('click', ()=>{ controls.reset(); camera.position.set(0,0.25,2.2); setState('View reset'); });
+
+    // Resize
+    window.addEventListener('resize', ()=>{
+      const w = window.innerWidth, h = window.innerHeight;
+      renderer.setSize(w,h); camera.aspect = w/h; camera.updateProjectionMatrix();
+    });
+
+    // Render loop
+    (function animate(){ requestAnimationFrame(animate); controls.update(); renderer.render(scene,camera); })();
+  </script>
+</body>
+</html>
